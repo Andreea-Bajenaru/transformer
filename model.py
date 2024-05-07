@@ -224,13 +224,131 @@ def fixed_batching_with_padding(sequences, labels, batch_size, pad_index):
     
     return batches
 
+class SelfAttention(nn.Module):
+    def __init__(self, input_dim, num_heads):
+        super(SelfAttention, self).__init__()
+        
+        self.num_heads = num_heads
+        self.head_dim = input_dim // num_heads if input_dim % num_heads == 0 else (input_dim // num_heads) + 1
+
+        
+        # Linear projections for Q, K, V
+        self.W_q = nn.Linear(input_dim, input_dim, bias=False)
+        self.W_k = nn.Linear(input_dim, input_dim, bias=False)
+        self.W_v = nn.Linear(input_dim, input_dim, bias=False)
+        
+        # Dropout layer
+        #self.dropout = nn.Dropout(dropout)
+        
+        # Output projection
+        #self.W_o = nn.Linear(input_dim, input_dim)
+        
+    def forward(self, x, mask=None):
+        batch_size = x.size(0)
+        seq_len = x.size(1)
+        
+
+        #Linear projections of Q, K, V
+        Q = self.W_q(x)
+        K = self.W_k(x)
+        V = self.W_v(x)
+        
+        # Split tensors into multiple heads
+        Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        #print("Shape of Q after reshaping:", Q.shape)
+        K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        #print("Shape of K after reshaping:", K.shape)
+        V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        #print("Shape of V after reshaping:", V.shape)
+
+        # Scaled dot-product
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.head_dim, dtype=torch.float32))
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+        attention_weights = F.softmax(scores, dim=-1)
+        #attention_weights = self.dropout(attention_weights)
+        output = torch.matmul(attention_weights, V)
+        
+        # Concatenate
+        output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+        #output = self.W_o(output)
+        
+        return output
+    
+class TransformerBlock(nn.Module):
+    def __init__(self, k, heads, dropout=0.1):
+        super().__init__()
+
+        self.attention = SelfAttention(k, heads, dropout)
+        self.layer_norm = nn.LayerNorm(k)
+        # Feedforward layer
+        self.linear1 = nn.Linear(k, 4 * k)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(4 * k, k)
+        # Layer normalization after feedforward
+        self.layer_norm_ff = nn.LayerNorm(k)
+    
+
+    def forward(self, x):
+        # Self-attention
+        attention_output = self.attention(x)
+        # Layer normalization after attention
+        attention_output = self.layer_norm(attention_output)
+        # Feedforward
+        ff_output = self.linear2(self.dropout(F.relu(self.linear1(attention_output))))
+        # Layer normalization after feedforward
+        output = self.layer_norm_ff(ff_output + attention_output)
+
+        return output
+    
+
+class Transformer(nn.Module):
+    def __init__(self, k, heads, depth, seq_length, num_tokens, num_classes):
+        super().__init__()
+        
+        self.num_tokens = num_tokens
+        self.token_emb = nn.Embedding(num_tokens, k)
+        self.pos_emb = nn.Embedding(seq_length, k)
+
+        tblocks = []
+        for i in range(depth):
+            tblocks.append(TransformerBlock(k=k, heads=heads))
+            self.tblocks = nn.Sequential(*tblocks)
+
+        # Output layer
+        self.output_layer = nn.Linear(k, num_classes)
+
+
+    def forward(self, x):
+        # Generate token embeddings
+        tokens = self.token_emb(x)
+        b, t, k = tokens.size()
+
+        # Generate position embeddings
+        positions = torch.arange(t)
+        positions = self.pos_emb(positions)[None, :, :].expand(b, t, k)
+
+        # Add positional embeddings to token embeddings
+        x = tokens + positions
+
+        # Pass through Transformer blocks
+        x = self.tblocks(x)
+
+        # Mean pooling
+        x = x.mean(dim=1)
+
+        # Compute log-probabilities using softmax
+        return F.log_softmax(x, dim=1)
+    
 
 vocab_size = len(w2i)
-model = SequenceModel(vocab_size)
+model = Transformer(k=300, heads=4, depth=4, seq_length=50, num_tokens=vocab_size, num_classes=2)
 loss_fn = F.cross_entropy
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 num_epochs = 5
 batch_size = 32 
+num_classes=2
+
 
 # Training Loop
 for epoch in range(num_epochs):
@@ -255,5 +373,3 @@ for epoch in range(num_epochs):
     val_accuracy = correct / total
     print(f"Epoch {epoch + 1}/{num_epochs}, Validation Accuracy: {val_accuracy:.2%}")
 
-
-print('done')
