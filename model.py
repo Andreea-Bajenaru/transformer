@@ -165,39 +165,6 @@ def load_toy(n=50_000, char=True, seed=0, name='lang'):
 
 (x_train, y_train), (x_val, y_val), (i2w, w2i), numcls = load_imdb(final=False)
 
-class SequenceModel(nn.Module):
-    def __init__(self, vocab_size, embedding_size=300, hidden_size=300, num_classes=2):
-        super(SequenceModel, self).__init__()
-
-        # Embedding layer
-        self.embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_size)
-
-        # Linear layer
-        self.linear = nn.Linear(embedding_size, hidden_size)
-
-        # Output layer
-        self.output_layer = nn.Linear(hidden_size, num_classes)
-        
-
-    def forward(self, inputs):
-
-        # Embedding layer
-        embedded = self.embedding(inputs)
-
-        # Linear layer
-        linear_output = self.linear(embedded)
-
-        # ReLu activation function
-        activations = F.relu(linear_output)
-
-        # Max pooling
-        pooled_output = activations.mean(dim=1)
-
-        # Output layer
-        output = self.output_layer(pooled_output)
-        
-        return output
-
 
 def fixed_batching_with_padding(sequences, labels, batch_size, pad_index):
     batches = []
@@ -225,7 +192,7 @@ def fixed_batching_with_padding(sequences, labels, batch_size, pad_index):
     return batches
 
 class SelfAttention(nn.Module):
-    def __init__(self, input_dim, num_heads):
+    def __init__(self, input_dim, num_heads, dropout=0.1):
         super(SelfAttention, self).__init__()
         
         self.num_heads = num_heads
@@ -325,24 +292,24 @@ class Transformer(nn.Module):
         b, t, k = tokens.size()
 
         # Generate position embeddings
-        positions = torch.arange(t)
-        positions = self.pos_emb(positions)[None, :, :].expand(b, t, k)
+        positions = torch.arange(t,dtype=torch.long).unsqueeze(0)
+        positions = self.pos_emb(positions).expand(b, t, -1)
 
         # Add positional embeddings to token embeddings
         x = tokens + positions
 
         # Pass through Transformer blocks
         x = self.tblocks(x)
+        
 
         # Mean pooling
         x = x.mean(dim=1)
 
-        # Compute log-probabilities using softmax
         return F.log_softmax(x, dim=1)
     
 
 vocab_size = len(w2i)
-model = Transformer(k=300, heads=4, depth=4, seq_length=50, num_tokens=vocab_size, num_classes=2)
+model = Transformer(k=300, heads=4, depth=4, seq_length=10, num_tokens=vocab_size, num_classes=2)
 loss_fn = F.cross_entropy
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 num_epochs = 5
