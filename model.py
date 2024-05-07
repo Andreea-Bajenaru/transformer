@@ -280,7 +280,7 @@ class Transformer(nn.Module):
         tblocks = []
         for i in range(depth):
             tblocks.append(TransformerBlock(k=k, heads=heads))
-            self.tblocks = nn.Sequential(*tblocks)
+        self.tblocks = nn.Sequential(*tblocks)
 
         # Output layer
         self.output_layer = nn.Linear(k, num_classes)
